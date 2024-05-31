@@ -34,4 +34,4 @@ rye run uvicorn src.mystroke_api.main:app --reload
 ```
 
 ##
-**Credit API :** [@Boatkungg](https://github.com/Boatkungg)
+**Credit Code API :** [@Boatkungg](https://github.com/Boatkungg)

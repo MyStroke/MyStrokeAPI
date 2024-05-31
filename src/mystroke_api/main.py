@@ -1,49 +1,62 @@
-from typing import List
-from fastapi import FastAPI, HTTPException
-import tensorflow as tf
+from typing import Annotated
+import io
+
+from fastapi import FastAPI, File
+from fastapi.middleware.cors import CORSMiddleware
+
+import mediapipe as mp
+
 import numpy as np
-import logging
+import tensorflow as tf
+from PIL import Image
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# Create a FastAPI instance
 app = FastAPI()
 
-# Load the model
-try:
-    model = tf.saved_model.load("MyStroke_model")
-    logger.info("Model loaded successfully")
-except Exception as e:
-    logger.error(f"Error loading model: {e}")
-    raise HTTPException(status_code=500, detail="Model loading failed")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Create API route
+loaded_model = tf.saved_model.load("MyStroke_model")
+hands = mp.solutions.hands.Hands()
+
+
+@app.get("/")
+async def root():
+    return "MyStroke API is running!!!"
+
+
 @app.post("/api")
-async def api(data: dict):
-    try:
-        landmarks = data.get("data", [])
-        if not landmarks:
-            raise ValueError("No landmarks provided")
+async def predict(image: Annotated[bytes, File()]):
+    img = Image.open(io.BytesIO(image))
+    img = img.convert("RGB")
 
-        # Convert landmarks to numpy array and reshape to (21, 3)
-        landmarks_array = np.array(landmarks, dtype=np.float32).reshape(21, 3)
+    wpercent = 512 / img.size[0]
+    hsize = int(img.size[1] * wpercent)
+    img = img.resize((512, hsize), Image.Resampling.LANCZOS)
 
-        # Run prediction
-        prediction = model(landmarks_array)
-        prediction = np.array(prediction[0])
+    img = np.array(img)
 
-        response_content = {
-            "prediction": prediction.tolist(),
-            "argmax": int(np.argmax(prediction)),
-            "top_2": np.argsort(prediction)[-2:].tolist(),
-        }
+    hands_result = hands.process(img)
+    hand_landmark = hands_result.multi_hand_landmarks
 
-        return response_content
-    except ValueError as ve:
-        logger.error(f"Value error: {ve}")
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        logger.error(f"Internal server error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    if hand_landmark is None:
+        return {"prediction": None}
+
+    landmark_list = []
+    for landmark in hand_landmark[0].landmark:
+        landmark_list.append(np.array([landmark.x, landmark.y, landmark.z]))
+
+    landmark_array = np.array(landmark_list)
+
+    prediction, _ = loaded_model(landmark_array)
+    prediction = np.array(prediction[0])
+    return {
+        "prediction": prediction.tolist(),
+        "argmax": np.argmax(prediction).tolist(),
+        "top_2": np.argsort(prediction)[-2:].tolist(),
+    }

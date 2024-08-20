@@ -13,6 +13,7 @@ COPY README.md /app/
 COPY .python-version /app/
 
 # install dependencies
+RUN pip install python-multipart
 RUN pip3 install .
 
 # run server
